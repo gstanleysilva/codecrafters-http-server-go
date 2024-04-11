@@ -4,10 +4,30 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 var Port = 4221
+
+type Request struct {
+	Method  string
+	Path    string
+	Headers map[string]string
+}
+
+type Response struct {
+	Status  int
+	Body    string
+	Headers map[string]string
+}
+
+func NewResponse(status int) Response {
+	return Response{
+		Status:  status,
+		Headers: make(map[string]string, 0),
+	}
+}
 
 func main() {
 	fmt.Printf("Server running on port %d\r\n", Port)
@@ -36,33 +56,57 @@ func handleRequests(conn net.Conn) {
 
 	fmt.Println(request.Method, request.Path)
 
-	if request.Path == "/" {
-		writeResponse(conn, 200)
-	} else {
-		writeResponse(conn, 404)
+	resource, params := parsePath(request.Path)
+
+	switch {
+	case resource == "/" || request.Path == "":
+		writeResponse(conn, NewResponse(200))
+	case resource == "/echo":
+		response := NewResponse(200)
+		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Length"] = strconv.Itoa(len(params))
+		response.Body = params
+		writeResponse(conn, response)
+	default:
+		writeResponse(conn, NewResponse(404))
 	}
 
 	conn.Close()
 }
 
-type Request struct {
-	Method  string
-	Path    string
-	Headers map[string]string
+func parsePath(path string) (resource string, params string) {
+	resource = path
+	parts := strings.Split(path, "/")
+
+	//base path
+	if len(parts) <= 2 {
+		return resource, params
+	}
+
+	//extract params from path
+	resource = fmt.Sprintf("/%s", parts[1])
+	for _, part := range parts[2:] {
+		if len(params) == 0 {
+			params = part
+			continue
+		}
+		params = fmt.Sprintf("%s/%s", params, part)
+	}
+
+	return resource, params
 }
 
 func parseRequest(conn net.Conn) Request {
 	var result Request
 
+	//read data from connection
 	buff := make([]byte, 1024)
-
 	size, err := conn.Read(buff)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 
 	strRequest := string(buff[:size])
-
 	lines := strings.Split(strRequest, "\r\n")
 
 	//Start Line
@@ -73,11 +117,21 @@ func parseRequest(conn net.Conn) Request {
 	return result
 }
 
-func writeResponse(conn net.Conn, statusCode int) {
-	_, err := conn.Write([]byte(getStringMessage(statusCode)))
-	if err != nil {
-		fmt.Println("failed to write bytes: ", err.Error())
-		os.Exit(1)
+func writeResponse(conn net.Conn, response Response) {
+	//StatusLine
+	conn.Write([]byte(getStringMessage(response.Status)))
+
+	//Headers
+	if len(response.Headers) != 0 {
+		for key, value := range response.Headers {
+			conn.Write([]byte(fmt.Sprintf("%s: %s\r\n", key, value)))
+		}
+	}
+	conn.Write([]byte("\r\n"))
+
+	//Body
+	if len(response.Body) != 0 {
+		conn.Write([]byte(fmt.Sprintf("%s\r\n", response.Body)))
 	}
 }
 
@@ -92,6 +146,6 @@ func statusToText(statusCode int) string {
 	}
 }
 
-func getStringMessage(statusCode int) string {
-	return fmt.Sprintf("HTTP/1.1 %d %s\r\n\r\n", statusCode, statusToText(statusCode))
+func getStringMessage(status int) string {
+	return fmt.Sprintf("HTTP/1.1 %d %s\r\n", status, statusToText(status))
 }
