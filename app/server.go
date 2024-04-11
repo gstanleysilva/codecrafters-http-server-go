@@ -16,6 +16,12 @@ type Request struct {
 	Headers map[string]string
 }
 
+func NewRequest() Request {
+	return Request{
+		Headers: make(map[string]string),
+	}
+}
+
 type Response struct {
 	Status  int
 	Body    string
@@ -67,6 +73,20 @@ func handleRequests(conn net.Conn) {
 		response.Headers["Content-Length"] = strconv.Itoa(len(params))
 		response.Body = params
 		writeResponse(conn, response)
+	case resource == "/user-agent":
+		response := NewResponse(200)
+
+		//get user-agent from request and add to response body
+		agent, ok := request.Headers["User-Agent"]
+		if ok {
+			response.Body = agent
+		}
+
+		//add response headers
+		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Length"] = strconv.Itoa(len(response.Body))
+
+		writeResponse(conn, response)
 	default:
 		writeResponse(conn, NewResponse(404))
 	}
@@ -97,7 +117,7 @@ func parsePath(path string) (resource string, params string) {
 }
 
 func parseRequest(conn net.Conn) Request {
-	var result Request
+	result := NewRequest()
 
 	//read data from connection
 	buff := make([]byte, 1024)
@@ -113,6 +133,16 @@ func parseRequest(conn net.Conn) Request {
 	parts := strings.Split(lines[0], " ")
 	result.Method = parts[0]
 	result.Path = parts[1]
+
+	for _, line := range lines[1:] {
+		if !strings.Contains(line, ": ") {
+			continue
+		}
+		parts := strings.Split(line, ": ")
+		if _, ok := result.Headers[parts[0]]; !ok {
+			result.Headers[parts[0]] = parts[1]
+		}
+	}
 
 	return result
 }
@@ -131,7 +161,7 @@ func writeResponse(conn net.Conn, response Response) {
 
 	//Body
 	if len(response.Body) != 0 {
-		conn.Write([]byte(fmt.Sprintf("%s\r\n", response.Body)))
+		conn.Write([]byte(response.Body))
 	}
 }
 
