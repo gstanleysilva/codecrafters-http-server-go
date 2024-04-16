@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -8,7 +9,10 @@ import (
 	"strings"
 )
 
-var Port = 4221
+var (
+	Port     = 4221
+	FilePath = ""
+)
 
 type Request struct {
 	Method  string
@@ -24,7 +28,7 @@ func NewRequest() Request {
 
 type Response struct {
 	Status  int
-	Body    string
+	Body    []byte
 	Headers map[string]string
 }
 
@@ -37,6 +41,15 @@ func NewResponse(status int) Response {
 
 func main() {
 	fmt.Printf("Server running on port %d\r\n", Port)
+
+	dir := flag.String("directory", "", "directory for http server files")
+	flag.Parse()
+
+	if dir != nil {
+		FilePath = *dir
+	}
+
+	// FilePath = "../"
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", Port))
 	if err != nil {
@@ -71,7 +84,7 @@ func handleRequests(conn net.Conn) {
 		response := NewResponse(200)
 		response.Headers["Content-Type"] = "text/plain"
 		response.Headers["Content-Length"] = strconv.Itoa(len(params))
-		response.Body = params
+		response.Body = []byte(params)
 		writeResponse(conn, response)
 	case resource == "/user-agent":
 		response := NewResponse(200)
@@ -79,11 +92,30 @@ func handleRequests(conn net.Conn) {
 		//get user-agent from request and add to response body
 		agent, ok := request.Headers["User-Agent"]
 		if ok {
-			response.Body = agent
+			response.Body = []byte(agent)
 		}
 
 		//add response headers
 		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Length"] = strconv.Itoa(len(response.Body))
+
+		writeResponse(conn, response)
+	case resource == "/files":
+		if params == "" || FilePath == "" {
+			writeResponse(conn, NewResponse(404))
+			break
+		}
+
+		content, err := os.ReadFile(fmt.Sprintf("%s%s", FilePath, params))
+		if err != nil {
+			writeResponse(conn, NewResponse(404))
+			break
+		}
+
+		//create response
+		response := NewResponse(200)
+		response.Body = content
+		response.Headers["Content-Type"] = "application/octet-stream"
 		response.Headers["Content-Length"] = strconv.Itoa(len(response.Body))
 
 		writeResponse(conn, response)
