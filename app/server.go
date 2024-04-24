@@ -18,6 +18,7 @@ type Request struct {
 	Method  string
 	Path    string
 	Headers map[string]string
+	Body    string
 }
 
 func NewRequest() Request {
@@ -100,6 +101,19 @@ func handleRequests(conn net.Conn) {
 		response.Headers["Content-Length"] = strconv.Itoa(len(response.Body))
 
 		writeResponse(conn, response)
+	case resource == "/files" && request.Method == "POST":
+		if params == "" || FilePath == "" {
+			writeResponse(conn, NewResponse(404))
+			break
+		}
+
+		err := os.WriteFile(fmt.Sprintf("%s%s", FilePath, params), []byte(request.Body), 0644)
+		if err != nil {
+			writeResponse(conn, NewResponse(404))
+			break
+		}
+
+		writeResponse(conn, NewResponse(201))
 	case resource == "/files":
 		if params == "" || FilePath == "" {
 			writeResponse(conn, NewResponse(404))
@@ -149,6 +163,7 @@ func parsePath(path string) (resource string, params string) {
 }
 
 func parseRequest(conn net.Conn) Request {
+	var headerEnd int
 	result := NewRequest()
 
 	//read data from connection
@@ -166,14 +181,22 @@ func parseRequest(conn net.Conn) Request {
 	result.Method = parts[0]
 	result.Path = parts[1]
 
-	for _, line := range lines[1:] {
+	//Read Headers
+	for idx, line := range lines[1:] {
+		headerEnd = idx
 		if !strings.Contains(line, ": ") {
-			continue
+			break
 		}
 		parts := strings.Split(line, ": ")
 		if _, ok := result.Headers[parts[0]]; !ok {
 			result.Headers[parts[0]] = parts[1]
 		}
+	}
+
+	//Read Body
+	bodyStart := headerEnd + 2
+	for _, line := range lines[bodyStart:] {
+		result.Body = fmt.Sprintf("%s%s", result.Body, line)
 	}
 
 	return result
